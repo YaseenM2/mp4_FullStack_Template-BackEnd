@@ -9,7 +9,7 @@ application = Flask(__name__)
 CORS(application)
 logging.basicConfig(level=logging.INFO)
 
-#Endpoint: Health Check
+# Endpoint: Health Check
 @application.route('/health', methods=['GET'])
 def health():
     """
@@ -17,22 +17,22 @@ def health():
     """
     return jsonify({"status": "healthy"}), 200
 
-#Endpoint: Data Insertion
+# Endpoint: Data Insertion
 @application.route('/events', methods=['POST'])
 def create_event():
     """
-    This endpoint should eventually insert data into the database.
-    The database communication is currently stubbed out.
-    You must implement insert_data_into_db() function to integrate with your MySQL RDS Instance.
+    Insert event data into the database.
     """
     try:
         payload = request.get_json()
         required_fields = ["title", "date"]
+
         if not payload or not all(field in payload for field in required_fields):
             return jsonify({"error": "Missing required fields: 'title' and 'date'"}), 400
 
         insert_data_into_db(payload)
         return jsonify({"message": "Event created successfully"}), 201
+
     except NotImplementedError as nie:
         return jsonify({"error": str(nie)}), 501
     except Exception as e:
@@ -42,13 +42,11 @@ def create_event():
             "detail": str(e)
         }), 500
 
-#Endpoint: Data Retrieval
+# Endpoint: Data Retrieval
 @application.route('/data', methods=['GET'])
 def get_data():
     """
-    This endpoint should eventually provide data from the database.
-    The database communication is currently stubbed out.
-    You must implement the fetch_data_from_db() function to integrate with your MySQL RDS Instance.
+    Retrieve all event data from the database.
     """
     try:
         data = fetch_data_from_db()
@@ -65,7 +63,7 @@ def get_data():
 def get_db_connection():
     """
     Establish and return a connection to the RDS MySQL database.
-    The following variables should be added to the Elastic Beanstalk Environment Properties for better security. Follow guidelines for more info.
+    Required Elastic Beanstalk environment properties:
       - DB_HOST
       - DB_USER
       - DB_PASSWORD
@@ -73,23 +71,28 @@ def get_db_connection():
     """
     required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]
     missing = [var for var in required_vars if not os.environ.get(var)]
+
     if missing:
         msg = f"Missing environment variables: {', '.join(missing)}"
         logging.error(msg)
         raise EnvironmentError(msg)
+
     try:
         connection = pymysql.connect(
             host=os.environ.get("DB_HOST"),
             user=os.environ.get("DB_USER"),
             password=os.environ.get("DB_PASSWORD"),
-            db=os.environ.get("DB_NAME")
+            db=os.environ.get("DB_NAME"),
+            cursorclass=pymysql.cursors.DictCursor
         )
         return connection
     except OperationalError as e:
         raise ConnectionError(f"Failed to connect to the database: {e}")
 
 def create_db_table():
-    connection = get_db_connection()
+    """
+    Create the events table if it does not already exist.
+    """
     try:
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
@@ -112,24 +115,63 @@ def create_db_table():
 
 def insert_data_into_db(payload):
     """
-    Stub for database communication.
-    Implement this function to insert the data into the database.
-    NOTE: Our autograder will automatically insert data into the DB automatically keeping in mind the explained SCHEMA, you dont have to insert your own data.
+    Insert a new event into the events table.
     """
     create_db_table()
-    # TODO: Implement the database call    
-    
-    raise NotImplementedError("Database insert function not implemented.")
 
-#Database Function Stub
+    title = payload.get("title")
+    event_date = payload.get("date")
+    description = payload.get("description")
+    image_url = payload.get("image_url")
+    location = payload.get("location")
+
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                insert_sql = """
+                INSERT INTO events (title, description, image_url, date, location)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(insert_sql, (
+                    title,
+                    description,
+                    image_url,
+                    event_date,
+                    location
+                ))
+            connection.commit()
+            logging.info("Event inserted successfully")
+    except Exception as e:
+        logging.exception("Failed to insert event into database")
+        raise RuntimeError(f"Database insert failed: {str(e)}")
+
 def fetch_data_from_db():
     """
-    Stub for database communication.
-    Implement this function to fetch your data from the database.
+    Fetch all events from the database in ascending order of date.
+    Date format must match:
+    "Mon, 01 Aug 2026 00:00:00 GMT"
     """
-    # TODO: Implement the database call
-    
-    raise NotImplementedError("Database fetch function not implemented.")
+    create_db_table()
+
+    try:
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                fetch_sql = """
+                SELECT id, title, description, image_url, date, location
+                FROM events
+                ORDER BY date ASC, id ASC
+                """
+                cursor.execute(fetch_sql)
+                rows = cursor.fetchall()
+
+                for row in rows:
+                    if row.get("date") is not None:
+                        row["date"] = row["date"].strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+                return rows
+    except Exception as e:
+        logging.exception("Failed to fetch data from database")
+        raise RuntimeError(f"Database fetch failed: {str(e)}")
 
 if __name__ == '__main__':
     application.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
